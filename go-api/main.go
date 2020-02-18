@@ -9,14 +9,15 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/serdarkalayci/prometheus-works/go-api/handlers"
 	"github.com/serdarkalayci/prometheus-works/go-api/middleware"
 
 	"github.com/nicholasjackson/env"
 )
 
-var bindAddress = env.String("BIND_ADDRESS", false, ":9000", "Bind address for the server")
+var bindAddress = env.String("BIND_ADDRESS", false, ":6543", "Bind address for the server")
 
 func main() {
 
@@ -25,18 +26,19 @@ func main() {
 	l := log.New(os.Stdout, "go-api ", log.LstdFlags)
 
 	// create the handlers
-	value := handlers.Newvalue(l)
+	value := handlers.NewValue(l)
 
 	// create a new serve mux and register the handlers
 	sm := mux.NewRouter()
+	sm.Use(middleware.MonitoringMiddleware)
 	getRouter := sm.Methods(http.MethodGet).Subrouter()
-	getRouter.HandleFunc("/value", value.GetValues)
+	getRouter.HandleFunc("/values", value.GetValues)
 	putRouter := sm.Methods(http.MethodPut).Subrouter()
-	putRouter.HandleFunc("/value/{id:[0-9]+}", value.PutValues)
-	putRouter.Use(value.MiddlewareValidateProduct)
+	putRouter.HandleFunc("/values/{id:[0-9]+}", value.PutValue)
+	//putRouter.Use(value.MiddlewareValidateProduct)
 	postRouter := sm.Methods(http.MethodPost).Subrouter()
-	postRouter.HandleFunc("/value", value.PostValue)
-	postRouter.Use(value.MiddlewareValidateProduct)
+	postRouter.HandleFunc("/values", value.PostValue)
+	//postRouter.Use(value.MiddlewareValidateProduct)
 
 	// create a new server
 	s := http.Server{
@@ -48,9 +50,13 @@ func main() {
 		IdleTimeout:  120 * time.Second, // max time for connections using TCP Keep-Alive
 	}
 
+	sm.PathPrefix("/metrics").Handler(promhttp.Handler())
+	prometheus.MustRegister(middleware.RequestCounterVec)
+	prometheus.MustRegister(middleware.RequestDurationGauge)
+
 	// start the server
 	go func() {
-		l.Println("Starting server on port 9000")
+		l.Println("Starting server on port 6543")
 
 		err := s.ListenAndServe()
 		if err != nil {
